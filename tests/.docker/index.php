@@ -10,6 +10,11 @@ if (isset($_GET['delay'])) {
     sleep((int) $_GET['delay']);
 }
 
+if (isset($_GET['file_size'])) {
+    echo str_repeat('x', (int) $_GET['file_size']);
+    return;
+}
+
 echo json_encode([
     'SERVER' => $_SERVER,
     'GET' => $_GET,

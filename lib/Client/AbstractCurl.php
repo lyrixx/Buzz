@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace Buzz\Client;
 
 use Buzz\Configuration\ParameterBag;
-use Buzz\Message\HeaderConverter;
+use Buzz\Exception\CallbackException;
 use Buzz\Exception\ClientException;
 use Buzz\Exception\NetworkException;
 use Buzz\Exception\RequestException;
+use Buzz\Message\HeaderConverter;
 use Buzz\Message\ResponseBuilder;
 use Psr\Http\Message\RequestInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
@@ -28,6 +29,10 @@ abstract class AbstractCurl extends AbstractClient
 
         $resolver->setDefault('curl', []);
         $resolver->setAllowedTypes('curl', ['array']);
+        // CURLOPT_BUFFERSIZE curl option could used to have a more accurate limit:
+        // https://curl.haxx.se/libcurl/c/CURLOPT_BUFFERSIZE.html
+        $resolver->setDefault('max_filesize', 0);
+        $resolver->setAllowedTypes('max_filesize', 'integer');
     }
 
     /**
@@ -92,6 +97,22 @@ abstract class AbstractCurl extends AbstractClient
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, false);
         curl_setopt($curl, CURLOPT_FAILONERROR, false);
+
+        if ($maxFilesize = $options->get('max_filesize')) {
+            curl_setopt($curl, CURLOPT_NOPROGRESS, false);
+            curl_setopt($curl, CURLOPT_PROGRESSFUNCTION, function ($curl, $downloadSize, $downloaded) use ($maxFilesize) {
+                if ($downloaded >= $maxFilesize) {
+                    return 1;
+                }
+
+                // Some servers don't send the $downloadSize. When they don't, $downloadSize === $maxFilesize
+                if ($downloadSize > $downloaded && $downloadSize > $maxFilesize) {
+                    return 2;
+                }
+
+                return 0;
+            });
+        }
 
         $this->setOptionsFromParameterBag($curl, $options);
         $this->setOptionsFromRequest($curl, $request);
@@ -210,6 +231,7 @@ abstract class AbstractCurl extends AbstractClient
      *
      * @throws NetworkException
      * @throws RequestException
+     * @throws CallbackException
      */
     protected function parseError(RequestInterface $request, int $errno, $curl): void
     {
@@ -223,6 +245,8 @@ abstract class AbstractCurl extends AbstractClient
             case CURLE_OPERATION_TIMEOUTED:
             case CURLE_SSL_CONNECT_ERROR:
                 throw new NetworkException($request, curl_error($curl), $errno);
+            case CURLE_ABORTED_BY_CALLBACK:
+                throw new CallbackException($request, curl_error($curl), $errno);
             default:
                 throw new RequestException($request, curl_error($curl), $errno);
         }
