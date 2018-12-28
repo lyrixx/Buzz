@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Buzz\Test\Integration;
 
 use Buzz\Browser;
+use Buzz\Client\AbstractCurl;
 use Buzz\Client\BuzzClientInterface;
 use Buzz\Client\Curl;
 use Buzz\Client\FileGetContents;
@@ -52,6 +53,24 @@ class BuzzIntegrationTest extends TestCase
         $this->assertArrayHasKey('SERVER', $data, $response->getBody()->__toString());
 
         $this->assertEmpty($data['SERVER']['CONTENT_TYPE']);
+    }
+
+    /**
+     * @dataProvider provideClient
+     */
+    public function testGetCurlInfo(BuzzClientInterface $client, bool $async)
+    {
+        if (!$client instanceof AbstractCurl) {
+            $this->markTestSkipped('Only Curl supports this feature.');
+        }
+
+        $request = new Request('GET', $_SERVER['BUZZ_TEST_SERVER']);
+        $response = $this->send($client, $request, $async);
+
+        $this->assertTrue($response->hasHeader('__curl_info'));
+        $curlInfo = json_decode($response->getHeader('__curl_info')[0], true);
+        $this->assertArrayHasKey('total_time', $curlInfo);
+        $this->assertGreaterThan(0, $curlInfo['total_time']);
     }
 
     /**
