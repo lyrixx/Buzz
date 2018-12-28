@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Buzz\Test\Integration;
 
 use Buzz\Browser;
+use Buzz\Client\AbstractCurl;
 use Buzz\Client\BuzzClientInterface;
 use Buzz\Client\Curl;
 use Buzz\Client\FileGetContents;
 use Buzz\Client\MultiCurl;
+use Buzz\Exception\CallbackException;
 use Buzz\Exception\ClientException;
 use Buzz\Exception\NetworkException;
 use Buzz\Message\FormRequestBuilder;
@@ -170,6 +172,31 @@ class BuzzIntegrationTest extends TestCase
         }
     }
 
+    /**
+     * @dataProvider provideClient
+     */
+    public function testMaxFileSize(BuzzClientInterface $client, bool $async)
+    {
+        if (!$client instanceof AbstractCurl) {
+            $this->markTestSkipped('Only Curl supports this feature.');
+        }
+
+        $request = new Request('GET', $_SERVER['BUZZ_TEST_SERVER'].'?file_size=5000');
+
+        // MultiCurl async handles all exceptions in the callback.
+        if ($async) {
+            $response = $this->send($client, $request, $async, ['max_filesize' => 1000]);
+
+            $this->assertNull($response);
+
+            return;
+        }
+
+        $this->expectException(CallbackException::class);
+
+        $this->send($client, $request, $async, ['max_filesize' => 1000]);
+    }
+
     public function provideClient()
     {
         return [
@@ -195,16 +222,17 @@ class BuzzIntegrationTest extends TestCase
         }
     }
 
-    private function send(BuzzClientInterface $client, RequestInterface $request, bool $async): ResponseInterface
+    private function send(BuzzClientInterface $client, RequestInterface $request, bool $async, array $options = []): ?ResponseInterface
     {
         if (!$async) {
-            return $client->sendRequest($request);
+            return $client->sendRequest($request, $options);
         }
 
         $newResponse = null;
-        $client->sendAsyncRequest($request, ['callback' => function (RequestInterface $request, ResponseInterface $response = null, ClientException $exception = null) use (&$newResponse) {
+        $options['callback'] = function (RequestInterface $request, ResponseInterface $response = null, ClientException $exception = null) use (&$newResponse) {
             $newResponse = $response;
-        }]);
+        };
+        $client->sendAsyncRequest($request, $options);
 
         $client->flush();
 
